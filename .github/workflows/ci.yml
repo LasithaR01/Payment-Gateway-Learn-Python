@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  api-smoke:
+    name: API smoke
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install API dependencies
+        run: uv sync --no-dev --group web
+
+      - name: Compile Python sources
+        run: uv run python -m compileall -q api main.py worker.py
+
+      - name: Import settings smoke check
+        run: |
+          uv run python -c "from api.settings import Settings; s = Settings(); print(s.ENV, s.DB_HOST, s.REDIS_HOST)"
+
+      - name: Template UTF-8 load smoke check
+        run: |
+          uv run python -c "from api.templates.defaults import default_templates; n = len(list(default_templates())); assert n > 0, n; print('templates', n)"
+
+  repo-layout:
+    name: Repo layout
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Required paths exist
+        run: |
+          test -f README.md
+          test -f api/main.py
+          test -f api/pyproject.toml
+          test -f admin/package.json
+          test -f store/package.json
+          test -f docs/CHANGELOG.md
+          test -f .cursor/rules/github-achievements-commits.mdc

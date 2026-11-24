@@ -19,8 +19,20 @@ run this path:
 2. Update docs in the same change set when behavior/setup changed (`README.md`, `docs/CHANGELOG.md`).
 3. Commit on a **feature branch** (not direct `main` when a PR helps).
 4. Push and **open a PR**.
-5. Merge only if the user also says merge.
-6. Print a short unlock checklist (what this PR helps vs what still needs separate work).
+5. Wait for root GitHub Actions (`CI`) on that PR.
+6. **Merge only if CI is green** and the user also says merge. If CI is red, fix on the branch, push, and do **not** merge.
+7. Print a short unlock checklist (what this PR helps vs what still needs separate work).
+
+## CI gate before merge (required)
+
+```text
+feature branch → PR → Actions CI runs → green = may merge → red = fix, no merge
+```
+
+- Root workflow: `.github/workflows/ci.yml` (API smoke + repo layout).
+- Nested Bitcart workflows under `api|admin|store/.github` do **not** count; ignore them.
+- Never merge a failing PR “to unlock badges”. Badges come from real merges after green CI.
+- If the user says merge while CI is red/pending, refuse merge and explain what failed / what to wait for.
 
 ## Already have (status)
 
@@ -43,7 +55,7 @@ Retired / unavailable: Arctic Code Vault, Mars 2020, Heart On Your Sleeve, Open 
 
 ## Default commit/PR workflow
 
-1. Feature **branch** → small real PR → merge (Pull Shark toward x4; self-merge keeps YOLO).
+1. Feature **branch** → small real PR → **CI green** → merge (Pull Shark toward x4; self-merge without review keeps YOLO, but only after green CI).
 2. Meaningful changes only — features, fixes, docs, local-run tooling.
 3. Prefer **public** remotes (private merges usually do not count for Pull Shark / Starstruck).
 
@@ -62,9 +74,9 @@ GitHub only runs workflows from the **repo-root** `.github/workflows/`. Nested c
 
 When touching CI:
 
-- Prefer a **root** workflow only if this learning repo needs one.
+- Keep and maintain the **root** workflow `.github/workflows/ci.yml`.
 - Do not enable nested Bitcart CI/release/renovate noise for this monorepo.
-- If cleaning Actions: remove or leave nested upstream workflows unused; never commit secrets into workflows.
+- Never commit secrets into workflows.
 
 ## Pair Extraordinaire
 
