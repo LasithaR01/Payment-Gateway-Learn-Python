@@ -165,6 +165,14 @@ uv run python worker.py
 
 Coin daemons and the Rust template renderer are only needed for real on-chain payments and HTML templates.
 
+## Docs and commits
+
+- Learning changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md)
+- Cursor rule for badge-friendly commits/PRs: `.cursor/rules/github-achievements-commits.mdc`
+- Nested Bitcart CI under `api/.github`, `admin/.github`, and `store/.github` does **not** run in this monorepo (GitHub only uses a root `.github/workflows`)
+
+Trigger phrase for the agent: **Commit and open a PR to unlock badges**
+
 ## Upstream
 
 These folders track three Bitcart repositories. Docker packaging lives in a fourth repo and is not copied here.
