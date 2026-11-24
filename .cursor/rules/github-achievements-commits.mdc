@@ -1,0 +1,95 @@
+---
+description: Unlock GitHub badges via commits/PRs; keep docs updated
+alwaysApply: true
+---
+
+# GitHub achievements + docs workflow
+
+When the user asks to **commit**, **push**, or **create a PR**, prefer a badge-friendly workflow — without fake/junk commits.
+
+## Trigger phrase
+
+When the user says (or clearly means):
+
+**`Commit and open a PR to unlock badges`**
+
+run this path:
+
+1. Stage **real** project changes only (never empty badge spam; never commit `api/conf/.env` or secrets).
+2. Update docs in the same change set when behavior/setup changed (`README.md`, `docs/CHANGELOG.md`).
+3. Commit on a **feature branch** (not direct `main` when a PR helps).
+4. Push and **open a PR**.
+5. Wait for root GitHub Actions (`CI`) on that PR.
+6. **Merge only if CI is green** and the user also says merge. If CI is red, fix on the branch, push, and do **not** merge.
+7. Print a short unlock checklist (what this PR helps vs what still needs separate work).
+
+## CI gate before merge (required)
+
+```text
+feature branch → PR → Actions CI runs → green = may merge → red = fix, no merge
+```
+
+- Root workflow: `.github/workflows/ci.yml` (API smoke + repo layout).
+- Nested Bitcart workflows under `api|admin|store/.github` do **not** count; ignore them.
+- Never merge a failing PR “to unlock badges”. Badges come from real merges after green CI.
+- If the user says merge while CI is red/pending, refuse merge and explain what failed / what to wait for.
+
+## Already have (status)
+
+| Badge | Status | Next tier (community-observed) |
+|-------|--------|--------------------------------|
+| Pull Shark | **x3** (≈128 merged PRs) | **x4** at **1,024** merged public PRs |
+| Pair Extraordinaire | base (no x) | **x2≈10**, **x3≈24**, **x4≈48** co-authored merged PRs |
+| Quickdraw | done (single tier) | — |
+| YOLO | done (single tier) | — |
+
+## Missing badges to unlock
+
+| Badge | Unlock | Tiers |
+|-------|--------|-------|
+| **Galaxy Brain** | Accepted answers in Discussions | **2 → 8 → 16 → 32** |
+| **Starstruck** | Stars on a **public** repo you own | **16 → 128 → 512 → 4,096** |
+| **Public Sponsor** | Sponsor someone via GitHub Sponsors | single tier |
+
+Retired / unavailable: Arctic Code Vault, Mars 2020, Heart On Your Sleeve, Open Sourcerer — do not chase.
+
+## Default commit/PR workflow
+
+1. Feature **branch** → small real PR → **CI green** → merge (Pull Shark toward x4; self-merge without review keeps YOLO, but only after green CI).
+2. Meaningful changes only — features, fixes, docs, local-run tooling.
+3. Prefer **public** remotes (private merges usually do not count for Pull Shark / Starstruck).
+
+## Auto-update docs on commit
+
+When committing substantive work, also update:
+
+- `README.md` — if run/setup/commands changed
+- `docs/CHANGELOG.md` — short dated bullet for what landed
+
+Do not rewrite upstream Bitcart history in `api/CHANGELOG.md` unless intentionally syncing upstream.
+
+## Clean GitHub Actions (this learning monorepo)
+
+GitHub only runs workflows from the **repo-root** `.github/workflows/`. Nested copies under `api/.github`, `admin/.github`, and `store/.github` are upstream Bitcart leftovers and do **not** run here.
+
+When touching CI:
+
+- Keep and maintain the **root** workflow `.github/workflows/ci.yml`.
+- Do not enable nested Bitcart CI/release/renovate noise for this monorepo.
+- Never commit secrets into workflows.
+
+## Pair Extraordinaire
+
+When a second GitHub identity/teammate exists, add:
+
+```text
+Co-authored-by: Name <email@users.noreply.github.com>
+```
+
+Ask once if unknown; never invent fake co-authors.
+
+## Outside git (remind when relevant)
+
+- **Galaxy Brain**: real Discussion answers marked accepted (need **2** for first badge).
+- **Public Sponsor**: user sponsors anyone ($1+).
+- **Starstruck**: share/improve public repo until **16** stars.
