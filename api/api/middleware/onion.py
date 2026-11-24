@@ -12,7 +12,12 @@ class OnionHostMiddleware(BaseHTTPMiddleware):
         tor_service = await request.state.dishka_container.get(TorService)
         response = await call_next(request)
         host = request.headers.get("host", "").split(":")[0]
-        onion_host = await tor_service.get_data("onion_host", "")
+        try:
+            onion_host = await tor_service.get_data("onion_host", "")
+        except Exception:
+            # Tor/onion headers are optional; do not fail Swagger or other pages
+            # when Redis is briefly unavailable during local development.
+            return response
         if onion_host and not tor_service.is_onion(host):
             response.headers["Onion-Location"] = onion_host + request.url.path
         return response

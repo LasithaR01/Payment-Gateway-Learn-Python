@@ -55,80 +55,115 @@ Invoice HTML is rendered by the Rust service in `api/renderer/`, not by Python s
 
 Inside `admin/` and `store/`, the `components`, `pages`, `store`, `plugins`, `layouts`, and `middleware` folders each have a short README. Those are Nuxt conventions from the upstream projects.
 
-## Run it locally
+## Full local run (Windows)
 
-You need Git, [uv](https://docs.astral.sh/uv) (Python 3.12+), Node.js with Yarn, PostgreSQL, and Redis. Rust is required only for the template renderer. A coin daemon is required only when you want a real on-chain payment.
+Everything below stays on your machine: PostgreSQL, Redis on `localhost:6379`, and the API on `localhost:8000`. Without Redis, the API can print “ready” but Swagger and App pages hang in the browser.
 
-Full task list for the API: `cd api` then `just`.
+### 1. PostgreSQL
 
-### API
+Create a database (name must match `DB_DATABASE` in `api/conf/.env`, often `bitcart` or `bitcartdb`). Keep Postgres running on port `5432`.
 
-```bash
+Browse it with pgAdmin, DBeaver, or `psql` — not MySQL Workbench.
+
+### 2. Redis (local, no Docker required)
+
+`uvicorn` only starts the Python API. Redis is a separate server (same idea as PostgreSQL), so that one command cannot also start Redis by itself.
+
+Install Redis once on Windows:
+
+```bat
+winget install Redis.Redis
+```
+
+Restart the terminal after install so `redis-server` is on PATH. Docker Redis still works if you prefer it, but it is optional.
+
+### 3. API
+
+Install `uv` once if needed:
+
+```bat
+py -m pip install uv
+```
+
+Then:
+
+```bat
 cd api
-uv sync
+uv sync --no-dev --group web
+copy conf\.env.dev.sample conf\.env
 ```
 
-Copy a sample config and edit the database password:
+Put your Postgres password in `api/conf/.env`:
 
-```bash
-# Windows PowerShell
-Copy-Item conf\.env.dev.sample conf\.env
-
-# macOS / Linux
-cp conf/.env.dev.sample conf/.env
+```
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=your-password
+DB_DATABASE=bitcartdb
 ```
 
-The API reads `conf/.env`. That file is gitignored. `conf/.env.sample` and `conf/.env.dev.sample` stay in git. Defaults if you skip a value: Postgres database `bitcart` on `127.0.0.1:5432`, user `postgres`, Redis on `127.0.0.1:6379`.
+Use the same database name you created in pgAdmin.
 
-Create the schema, then start the HTTP API:
+Migrate once, then use the one local command (starts Redis if needed, then the API):
 
-```bash
-just db-migrate
-just dev-api
+```bat
+uv run alembic upgrade head
+run_local.bat
 ```
 
-That serves http://localhost:8000 with reload. OpenAPI is on that same host.
+Or:
 
-Two more processes, each in its own terminal, from `api/`:
-
-```bash
-just worker      # notifications, payouts, background jobs
-just renderer    # Rust template renderer (needs Rust)
+```bat
+uv run python scripts\run_local.py
 ```
 
-A Bitcoin daemon, testnet:
+That is the Windows equivalent of “one command”. Plain `uv run uvicorn ...` still works if Redis is already running.
 
-```bash
-just testnet
-```
+On Windows, `just` needs a Unix `sh` shell, so use `alembic` / `run_local` as above. Leave this terminal open. The startup banner must show Redis `[UP]`.
 
-### Admin
+| URL | What it is |
+| --- | --- |
+| http://127.0.0.1:8000 | API docs |
+| http://127.0.0.1:8000/swagger | Swagger UI |
+| http://127.0.0.1:8000/redoc | ReDoc |
+| http://127.0.0.1:8000/openapi.json | OpenAPI schema |
 
-```bash
+`uv sync --no-dev --group web` installs the API only. A full `uv sync` also builds every coin daemon and can fail on Windows path length limits.
+
+### 4. Admin panel (optional)
+
+New terminal:
+
+```bat
 cd admin
 yarn
 yarn dev
 ```
 
-http://localhost:3000. It uses http://localhost:8000 unless you set `BITCART_ADMIN_API_URL`.
+http://localhost:3000 → local API at http://localhost:8000
 
-To click around without a local API:
+### 5. Storefront (optional)
 
-```bash
-# PowerShell
-$env:BITCART_ADMIN_API_URL = "https://api.bitcart.ai"
-yarn dev
-```
+New terminal:
 
-### Store
-
-```bash
+```bat
 cd store
 yarn
 yarn dev --port 4000
 ```
 
-http://localhost:4000. API URL override: `BITCART_STORE_API_URL`.
+http://localhost:4000
+
+### Optional API extras
+
+From `api/`, each in its own terminal (Git Bash or WSL if `just` is used):
+
+```bat
+uv run python worker.py
+```
+
+Coin daemons and the Rust template renderer are only needed for real on-chain payments and HTML templates.
 
 ## Upstream
 

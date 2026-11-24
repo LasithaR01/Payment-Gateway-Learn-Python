@@ -45,6 +45,59 @@ from api.worker import start_broker_basic
 logger = get_logger("api")
 
 
+def _port_open(host: str, port: int, timeout: float = 0.5) -> bool:
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def print_developer_access(settings: Settings) -> None:
+    base = settings.api_url.rstrip("/")
+    cryptos = ", ".join(settings.ENABLED_CRYPTOS) or "(none)"
+    db_ok = _port_open(settings.DB_HOST, settings.DB_PORT)
+    redis_host = settings.REDIS_HOST.removeprefix("redis://").split("/")[0].split(":")[0] or "127.0.0.1"
+    redis_ok = _port_open(redis_host, settings.REDIS_PORT)
+    db_status = "UP" if db_ok else "DOWN - start PostgreSQL"
+    redis_status = "UP" if redis_ok else "DOWN - start Redis (pages will hang)"
+    lines = [
+        "",
+        "=" * 60,
+        "  Payment Gateway API is ready",
+        "=" * 60,
+        f"  App             {base}",
+        f"  Swagger         {base}/swagger",
+        f"  ReDoc           {base}/redoc",
+        f"  OpenAPI JSON    {base}/openapi.json",
+        "",
+        f"  PostgreSQL      {settings.DB_HOST}:{settings.DB_PORT}  [{db_status}]",
+        f"  Database        {settings.DB_DATABASE}",
+        f"  DB user         {settings.DB_USER}",
+        f"  Redis           {redis_host}:{settings.REDIS_PORT} (db {settings.REDIS_DB})  [{redis_status}]",
+        "",
+        f"  Admin panel     {settings.admin_url}",
+        f"  Cryptos         {cryptos}",
+        f"  Environment     {settings.ENV}",
+        "=" * 60,
+        "  Tip: leave this terminal open. Ctrl+C stops the API.",
+        "  Redis must be up before Swagger/App pages load.",
+        "  Optional: worker, renderer, and coin daemons are separate.",
+        "=" * 60,
+        "",
+    ]
+    print("\n".join(lines), flush=True)
+    if not redis_ok:
+        print(
+            "  WARNING: Redis is not reachable. Browser pages may fail.\n"
+            "  Start Windows Redis:  net start Redis\n"
+            "  Or one-command API:   run_local.bat\n",
+            flush=True,
+        )
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     sys.excepthook = excepthook_handler(logger, sys.excepthook)
@@ -58,6 +111,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await plugin_registry.startup()
     for service in ServicesProvider.TO_PRELOAD:
         await app.state.dishka_container.get(service)
+    print_developer_access(app.state.settings)
     yield
     await plugin_registry.shutdown()
     broker_task.cancel()
@@ -283,6 +337,7 @@ def configure_production_app() -> FastAPI:
     container = build_container(settings)
     configure_sentry(settings)
     app = get_app(settings)
+    app.state.settings = settings
     app.state.broker = broker
     app.state.client_broker = client_tasks_broker
     setup_dishka(container=container, app=app)

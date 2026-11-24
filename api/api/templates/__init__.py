@@ -66,7 +66,7 @@ class Template:
 
     def load_from_file(self, name: str) -> str:
         try:
-            with open(f"{self.prefix}/{name}.j2") as f:
+            with open(f"{self.prefix}/{name}.j2", encoding="utf-8") as f:
                 return f.read().strip()
         except OSError as e:
             raise TemplateLoadError(f"Failed to load template {name}: {e.strerror}") from e

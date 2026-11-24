@@ -21,16 +21,17 @@ REDIS_MAINT_NOTIFICATIONS = MaintNotificationsConfig(enabled=False)
 
 
 async def create_redis(settings: Settings) -> AsyncIterator[Redis]:
+    # Keep timeouts finite on Windows so a down/broken Redis fails fast
+    # instead of exhausting ephemeral ports with endless reconnects.
     redis = _async_redis.Redis.from_url(
         settings.redis_url,
         decode_responses=True,
-        max_connections=2**31,
+        max_connections=50,
         retry_on_error=REDIS_RETRY_ON_ERRROR,
-        retry=REDIS_RETRY,
+        retry=Retry(default_backoff(), retries=3),
         maint_notifications_config=REDIS_MAINT_NOTIFICATIONS,
-        # TODO: re-check if those 2 are necessary
-        socket_timeout=None,
-        socket_connect_timeout=None,
+        socket_timeout=5,
+        socket_connect_timeout=2,
     )
     yield redis
     await redis.close()
