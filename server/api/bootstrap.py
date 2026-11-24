@@ -1,0 +1,292 @@
+import asyncio
+import contextlib
+import sys
+import traceback
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from typing import Any
+
+import asyncpg
+from advanced_alchemy.exceptions import AdvancedAlchemyError, NotFoundError
+from dishka.integrations.taskiq import setup_dishka as taskiq_setup_dishka
+from fastapi import Depends, FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from scalar_fastapi import get_scalar_api_reference
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from starlette.applications import Starlette
+from starlette.exceptions import HTTPException
+from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import HTTPConnection
+from starlette.responses import Response
+from starlette.staticfiles import StaticFiles
+from starlette.types import Receive, Scope, Send
+
+from api.db import AsyncSession
+from api.exceptions import EmailSendError, ExchangeRatesUnavailableError, RendererUnavailableError
+from api.ext.agent import AgentError, AgentErrorCode
+from api.ioc import build_container, setup_dishka
+from api.ioc.services import ServicesProvider
+from api.logging import configure as configure_logging
+from api.logging import get_exception_details, get_logger
+from api.middleware import LogCorrelationIdMiddleware, OnionHostMiddleware, PrometheusMiddleware
+from api.openapi import generate_operation_id, get_openapi_parameters, set_openapi_generator, set_openapi_route
+from api.sentry import configure_sentry
+from api.services.host_agent import error_response
+from api.services.plugin_registry import PluginRegistry
+from api.settings import Settings
+from api.tasks import broker, client_tasks_broker
+from api.utils.common import excepthook_handler, handle_event_loop_exception
+from api.views import router
+from api.views.files import UserFilesStaticFiles
+from api.worker import start_broker_basic
+
+logger = get_logger("api")
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    sys.excepthook = excepthook_handler(logger, sys.excepthook)
+    asyncio.get_running_loop().set_exception_handler(
+        lambda *args, **kwargs: handle_event_loop_exception(logger, *args, **kwargs)
+    )
+    await app.state.broker.startup()
+    broker_task = asyncio.create_task(start_broker_basic(app.state.client_broker))
+    plugin_registry = await app.state.dishka_container.get(PluginRegistry)
+    plugin_registry.setup_app(app)
+    await plugin_registry.startup()
+    for service in ServicesProvider.TO_PRELOAD:
+        await app.state.dishka_container.get(service)
+    yield
+    await plugin_registry.shutdown()
+    broker_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await broker_task
+    await app.state.dishka_container.close()
+
+
+# TODO: remove when https://github.com/fastapi/fastapi/pull/11160 is merged
+def patch_call(instance: FastAPI) -> None:
+    class _(type(instance)):  # type: ignore[misc]
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if self.root_path:
+                root_path = scope.get("root_path", "")
+                if root_path and self.root_path != root_path:
+                    logger.warning(
+                        f"The ASGI server is using a different root path than the one "
+                        f"configured in FastAPI. The configured root path is: "
+                        f"{self.root_path}, the ASGI server root path is: {root_path}. "
+                        f"The former will be used."
+                    )
+                scope["root_path"] = self.root_path
+                path = scope.get("path")
+                if path and not path.startswith(self.root_path):
+                    scope["path"] = self.root_path + path
+                raw_path: bytes | None = scope.get("raw_path")
+                if raw_path and not raw_path.startswith(self.root_path.encode()):
+                    scope["raw_path"] = self.root_path.encode() + raw_path
+            await Starlette.__call__(self, scope, receive, send)
+
+    instance.__class__ = _
+
+
+async def db_exception_handler(request: Request, exc: AdvancedAlchemyError) -> JSONResponse:
+    logger.error("Database error", exc_info=exc)
+    return JSONResponse(
+        status_code=422,
+        content={"error": "Database error", "detail": exc.detail},
+    )
+
+
+async def db_integrity_error_handler(request: Request, exc: IntegrityError) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={"error": "Database error", "detail": str(exc.orig)},
+    )
+
+
+def internal_error_response() -> Response:
+    logger.error(traceback.format_exc())
+    return PlainTextResponse("Internal Server Error", status_code=500)
+
+
+async def db_data_error_handler(request: Request, exc: DBAPIError) -> Response:
+    cause = getattr(exc.orig, "__cause__", None)
+    if not isinstance(cause, asyncpg.exceptions.DataError):
+        return internal_error_response()
+    return JSONResponse(
+        status_code=422,
+        content={"error": "Invalid input", "detail": "Request contains data the database cannot store"},
+    )
+
+
+async def db_not_found_error_handler(request: Request, exc: NotFoundError) -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={"error": "Not found", "detail": str(exc)},
+    )
+
+
+AGENT_ERROR_STATUSES: dict[str, int] = {
+    AgentErrorCode.NOT_FOUND: 404,
+    AgentErrorCode.INVALID_ARGUMENT: 422,
+    AgentErrorCode.UNKNOWN_COMMAND: 501,
+    AgentErrorCode.UNAVAILABLE: 503,
+}
+
+
+async def agent_error_handler(request: Request, exc: AgentError) -> JSONResponse:
+    return JSONResponse(
+        status_code=AGENT_ERROR_STATUSES.get(exc.code, 502),
+        content={"error": "Host agent error", "detail": error_response(exc)["message"]},
+    )
+
+
+async def exchange_rates_error_handler(request: Request, exc: ExchangeRatesUnavailableError) -> JSONResponse:
+    logger.warning(f"{request.method} {request.url.path}: {get_exception_details(exc)}")
+    return JSONResponse(
+        status_code=503,
+        content={"error": "Exchange rates unavailable", "detail": "Exchange rates are temporarily unavailable"},
+    )
+
+
+async def renderer_error_handler(request: Request, exc: RendererUnavailableError) -> JSONResponse:
+    logger.warning(f"{request.method} {request.url.path}: {get_exception_details(exc)}")
+    return JSONResponse(
+        status_code=503,
+        content={"error": "Templates unavailable", "detail": "Templates are temporarily unavailable"},
+    )
+
+
+async def email_send_error_handler(request: Request, exc: EmailSendError) -> JSONResponse:
+    logger.warning(f"{request.method} {request.url.path}: {get_exception_details(exc)}")
+    return JSONResponse(
+        status_code=502,
+        content={"error": "Email delivery failed", "detail": "The email could not be sent"},
+    )
+
+
+exception_handlers: dict[type[Exception], Callable[[Request, Any], Awaitable[Response]]] = {
+    HTTPException: http_exception_handler,
+    RequestValidationError: request_validation_exception_handler,
+    IntegrityError: db_integrity_error_handler,
+    DBAPIError: db_data_error_handler,
+    NotFoundError: db_not_found_error_handler,
+    AdvancedAlchemyError: db_exception_handler,
+    AgentError: agent_error_handler,
+    ExchangeRatesUnavailableError: exchange_rates_error_handler,
+    RendererUnavailableError: renderer_error_handler,
+    EmailSendError: email_send_error_handler,
+}
+
+
+def add_exception_handlers(app: FastAPI) -> None:
+    for exc_type, handler in exception_handlers.items():
+        app.add_exception_handler(exc_type, handler)
+
+    @app.exception_handler(500)
+    async def exception_handler(request: Request, exc: Exception) -> Response:
+        return internal_error_response()
+
+
+async def transaction(connection: HTTPConnection) -> AsyncGenerator[None]:
+    session = await connection.state.dishka_container.get(AsyncSession)
+    try:
+        yield
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+
+
+def get_app(settings: Settings) -> FastAPI:
+    app = FastAPI(
+        lifespan=lifespan,
+        root_path=settings.ROOT_PATH,
+        root_path_in_servers=False,
+        generate_unique_id_function=generate_operation_id,
+        openapi_url=None,
+        dependencies=[Depends(transaction, scope="function")],
+        **get_openapi_parameters(settings),
+    )
+    set_openapi_route(app)
+
+    @app.get("/", include_in_schema=False)
+    async def scalar_html(req: Request) -> Any:
+        root_path = req.scope.get("root_path", "").rstrip("/")
+        openapi_url = root_path + app.openapi_url
+        return get_scalar_api_reference(
+            openapi_url=openapi_url,
+            title=app.title,
+            servers=list(reversed(app.servers)),
+            scalar_favicon_url="/favicon.ico",
+            dark_mode=False,
+        )
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon() -> Any:
+        return FileResponse("static/favicon.ico")
+
+    @app.get("/swagger", include_in_schema=False)
+    async def swagger_docs(req: Request) -> HTMLResponse:
+        root_path = req.scope.get("root_path", "").rstrip("/")
+        openapi_url = root_path + app.openapi_url
+        return get_swagger_ui_html(
+            openapi_url=openapi_url,
+            title=f"{app.title} - Swagger UI",
+            swagger_favicon_url="/favicon.ico",
+            swagger_ui_parameters=app.swagger_ui_parameters,
+        )
+
+    @app.get("/redoc", include_in_schema=False)
+    async def redoc_docs(req: Request) -> HTMLResponse:
+        root_path = req.scope.get("root_path", "").rstrip("/")
+        openapi_url = root_path + app.openapi_url
+        return get_redoc_html(
+            openapi_url=openapi_url,
+            title=f"{app.title} - ReDoc",
+            redoc_favicon_url="/favicon.ico",
+        )
+
+    app.add_middleware(OnionHostMiddleware)
+    app.add_middleware(LogCorrelationIdMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["Content-Disposition"],
+    )
+    patch_call(app)
+    app.mount("/static", StaticFiles(directory=settings.STATIC_DIR), name="static")
+    app.mount("/images", StaticFiles(directory=settings.images_dir), name="images")
+    app.mount("/files/localstorage", UserFilesStaticFiles(directory=settings.files_dir), name="files")
+    add_exception_handlers(app)
+    app.include_router(router)
+    return app
+
+
+def setup_prometheus(app: FastAPI, settings: Settings) -> None:
+    if not settings.PROMETHEUS_METRICS_ENABLED:
+        return
+    from api.views import metrics
+
+    app.add_middleware(PrometheusMiddleware)
+    app.include_router(metrics.router)
+
+
+def configure_production_app() -> FastAPI:
+    settings = Settings()
+    configure_logging(settings=settings)
+    container = build_container(settings)
+    configure_sentry(settings)
+    app = get_app(settings)
+    app.state.broker = broker
+    app.state.client_broker = client_tasks_broker
+    setup_dishka(container=container, app=app)
+    taskiq_setup_dishka(container=container, broker=client_tasks_broker)
+    set_openapi_generator(app, settings)
+    setup_prometheus(app, settings)
+    return app

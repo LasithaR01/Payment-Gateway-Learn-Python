@@ -1,0 +1,58 @@
+{
+  "name": "bitcart-store",
+  "version": "1.0.0",
+  "description": "Bitcart Store",
+  "author": "MrNaif2018",
+  "private": true,
+  "scripts": {
+    "dev": "nuxt",
+    "build": "nuxt build",
+    "start": "nuxt-start",
+    "generate": "nuxt generate",
+    "lint": "eslint --ext .js,.vue --ignore-path .gitignore .",
+    "lintfix": "eslint --fix --ext .js,.vue --ignore-path .gitignore .",
+    "lintfix:precommit": "eslint --fix",
+    "prettier": "prettier --write --list-different --ignore-unknown",
+    "update-bulma-colors": "bulma-css-vars"
+  },
+  "dependencies": {
+    "@chenfengyuan/vue-qrcode": "^1.0.1",
+    "@ergonode/vuems": "^1.1.0",
+    "@nuxtjs/axios": "^5.12.5",
+    "@nuxtjs/router": "^1.7.0",
+    "buefy": "^0.9.0",
+    "is-https": "^4.0.0",
+    "lazysizes": "^5.3.2",
+    "nuxt-start": "^2.15.1",
+    "slugify": "^1.4.6",
+    "socks-proxy-agent": "^8.0.0",
+    "vee-validate": "^2.2.15",
+    "vuex-persistedstate": "^4.0.0"
+  },
+  "devDependencies": {
+    "@babel/eslint-parser": "^7.16.5",
+    "@fortawesome/fontawesome-free": "^6.0.0",
+    "@nuxtjs/eslint-config": "^10.0.0",
+    "@nuxtjs/eslint-module": "^3.0.0",
+    "@nuxtjs/pwa": "^3.3.4",
+    "bulma": "0.9.4",
+    "bulma-css-vars": "^0.8.0",
+    "bulma-steps": "^2.2.1",
+    "bulma-switch": "^2.0.0",
+    "eslint": "^8.0.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-nuxt": ">=2.0.0",
+    "eslint-plugin-prettier": "^4.0.0",
+    "lodash.debounce": "^4.0.8",
+    "lodash.mergewith": "^4.6.2",
+    "nuxt": "^2.15.1",
+    "prettier": "^2.2.1",
+    "pug": "^3.0.1",
+    "pug-plain-loader": "^1.1.0",
+    "sass": "<1.77.7",
+    "sass-loader": "^10.1.1"
+  },
+  "resolutions": {
+    "sass": "<1.77.7"
+  }
+}

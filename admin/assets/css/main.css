@@ -1,0 +1,38 @@
+.row {
+  margin-top: 0px !important;
+  margin-bottom: 0px !important;
+}
+html {
+  overflow-y: auto !important;
+}
+.cursor-pointer:hover {
+  cursor: pointer;
+}
+
+label.theme--dark + input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  transition: background-color 5000s ease-in-out 0s;
+  -webkit-text-fill-color: #fff !important;
+  -webkit-text-size-adjust: inherit !important;
+}
+
+label.theme--light + input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  transition: background-color 5000s ease-in-out 0s;
+  -webkit-text-fill-color: #000 !important;
+  -webkit-text-size-adjust: inherit !important;
+}
+
+label.theme--dark + input::-webkit-credentials-auto-fill-button {
+  background-color: #fff !important;
+}
+
+input[type="password"]::-webkit-credentials-auto-fill-button {
+  visibility: hidden;
+  display: none !important;
+  pointer-events: none;
+}

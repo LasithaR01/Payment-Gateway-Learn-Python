@@ -1,0 +1,20 @@
+name: Issues Diagram
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow_ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  update-diagram:
+    name: update-diagram
+    uses: bitcart/bitcart-actions/.github/workflows/issues-diagram.yml@master
+
+    permissions:
+      issues: write # to create issues diagram
